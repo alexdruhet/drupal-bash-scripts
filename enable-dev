@@ -1,0 +1,32 @@
+#!/bin/bash
+
+DEFAULT_COLOR='\033[0m'
+SUCCESS_COLOR='\033[32m'
+NOTICE_COLOR='\033[33m'
+ERROR_COLOR='\033[31m'
+SUCCESS_COLOR_BOLD='\033[32;1m'
+NOTICE_COLOR_BOLD='\033[33;1m'
+ERROR_COLOR_BOLD='\033[31;1m'
+
+DONE=$SUCCESS_COLOR_BOLD'✔ Done'$DEFAULT_COLOR
+
+SITE_ALIAS="$1"
+
+if [ -z $SITE_ALIAS ] ; then
+  echo "No site alias defined!"
+  exit 1
+fi
+
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR}Enabling dev settings for ${SITE_ALIAS}.${DEFAULT_COLOR}"
+
+drush -y $SITE_ALIAS en devel context_ui field_ui l10n_update rules_admin views_ui
+drush -y $SITE_ALIAS vset preprocess_css 0 
+drush -y $SITE_ALIAS vset preprocess_js 0 
+drush -y $SITE_ALIAS vset cache 0 
+drush -y $SITE_ALIAS cc all
+
+echo -e "${SUCCESS_COLOR}Dev settings are now enabled for ${SITE_ALIAS}${DEFAULT_COLOR} ${DONE}"
+echo "--------------------------------------------------------------------"
+echo

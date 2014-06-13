@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Arguments handler need works
+# Use static args instead
+# So you nedd to modify and uncomment the following line
+# set '@alias_from.local' '@alias_to.live'
+
+DEFAULT_COLOR='\033[0m'
+SUCCESS_COLOR='\033[32m'
+NOTICE_COLOR='\033[33m'
+ERROR_COLOR='\033[31m'
+SUCCESS_COLOR_BOLD='\033[32;1m'
+NOTICE_COLOR_BOLD='\033[33;1m'
+ERROR_COLOR_BOLD='\033[31;1m'
+
+DONE=$SUCCESS_COLOR_BOLD'✔ Done'$DEFAULT_COLOR
+
+SITE_ALIAS_FROM="$1"
+SITE_ALIAS_TO="$2"
+
+if [ -z $SITE_ALIAS_FROM ] ; then
+  echo "No site alias origin defined!"
+  exit 1
+fi
+echo -ne "${NOTICE_COLOR}Attempting to sync french translations from ${SITE_ALIAS_FROM}..."
+
+if [ -z $SITE_ALIAS_TO ] ; then
+  echo "No site alias destination defined!"
+  exit 1
+fi
+echo -e " to ${SITE_ALIAS_TO}${DEFAULT_COLOR}"
+echo -e ${NOTICE_COLOR_BOLD}'Do you really want to continue? (y/n):'${DEFAULT_COLOR}
+read answer
+case $answer in
+    y|Y) 
+        echo -e ${NOTICE_COLOR}'Starting syncing process...'${DEFAULT_COLOR}
+        ;;
+    *) 
+        echo "operation aborted" >&2
+        exit 1
+        ;;
+esac
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}EXPORT fr.po${DEFAULT_COLOR}"
+rm ./fr.po
+drush -v $SITE_ALIAS_FROM language-export fr fr.po
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}SYNC fr.po${DEFAULT_COLOR}"
+REMOTE_SSH_OPTS=$(drush php-eval 'echo drush_sitealias_evaluate_path("'$SITE_ALIAS_TO'", $opts = array())["ssh-options"];')
+REMOTE_PATH=$(drush php-eval 'echo drush_sitealias_evaluate_path("'$SITE_ALIAS_TO'", $opts = array())["evaluated-path"];')
+RSYNC_FR="rsync -e 'ssh "$REMOTE_SSH_OPTS"' -akzv ./fr.po "$REMOTE_PATH""
+echo "$RSYNC_FR"
+eval "$RSYNC_FR"
+rm ./fr.po
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}IMPORT fr.po${DEFAULT_COLOR}"
+drush -y $SITE_ALIAS_TO dl drush_language --dev
+drush -y $SITE_ALIAS_TO cc drush
+drush $SITE_ALIAS_TO ssh 'drush -vy language-import fr fr.po && rm fr.po'
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}CLEAR CACHE${DEFAULT_COLOR}"
+drush -y $SITE_ALIAS_TO vset preprocess_js 1
+drush -y $SITE_ALIAS_TO vset preprocess_css 1
+drush -y $SITE_ALIAS_TO vset cache 1
+drush -y $SITE_ALIAS_TO cc all
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${SUCCESS_COLOR}UPDATE FR FINISHED${DEFAULT_COLOR} ${DONE}"
+echo

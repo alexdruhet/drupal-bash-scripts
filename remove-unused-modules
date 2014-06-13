@@ -1,0 +1,155 @@
+#!/bin/bash
+
+DEFAULT_COLOR='\033[0m'
+SUCCESS_COLOR='\033[32m'
+NOTICE_COLOR='\033[33m'
+ERROR_COLOR='\033[31m'
+SUCCESS_COLOR_BOLD='\033[32;1m'
+NOTICE_COLOR_BOLD='\033[33;1m'
+ERROR_COLOR_BOLD='\033[31;1m'
+
+DONE=$SUCCESS_COLOR_BOLD'✔ Done'$DEFAULT_COLOR
+
+### Determine if a drush site alias has been passed in argument
+### loop through arguments to get the first beginning with a @
+#
+SITE_ALIAS=''
+for var in "$@"; do
+if [[ $1 =~ ^@ ]]; then
+    SITE_ALIAS=$1
+    break
+fi
+done
+
+if [ -z $SITE_ALIAS ] ; then
+  echo -e "${ERROR_COLOR}No site alias defined!${DEFAULT_COLOR}"
+  exit 1
+fi
+
+DRUPAL_ROOT=$(sed -e 's/^[[:space:]]*//' <<<$(drush $SITE_ALIAS status --fields=root --field-labels=0))
+DRUPAL_ROOT=$(sed -e "s/$(printf '\r')\$//" <<<$DRUPAL_ROOT)
+DRUPAL_ROOT=$(sed -e 's/[[:space:]]*\$//' <<<$DRUPAL_ROOT)
+DUMP_DIR=$(pwd)/backup/$SITE_ALIAS/
+
+if [ ! -d $DUMP_DIR ] 
+then
+  mkdir -p $DUMP_DIR
+fi
+
+LOG_FILE="${DUMP_DIR}${SITE_ALIAS}_remove_unused_modules_report.`date +%Y-%m-%d`.log"
+BACKUP_ARCHIVE="${DUMP_DIR}${SITE_ALIAS}_modules.`date +%Y-%m-%d`.tar.gz"
+SQL_ARCHIVE="${DUMP_DIR}${SITE_ALIAS}.`date +%Y-%m-%d`.sql"
+MODULES_ABS_PATH=$DRUPAL_ROOT/sites/all/modules
+
+if [ -f $LOG_FILE ] 
+then
+  rm $LOG_FILE >&2
+fi
+
+echo -e "Attempting to remove unused modules of ${SITE_ALIAS} (`date +%Y-%m-%d`), located at ${DRUPAL_ROOT}" >> $LOG_FILE
+echo -e "${NOTICE_COLOR}Attempting to remove unused modules of ${SITE_ALIAS}, located at ${DRUPAL_ROOT}${DEFAULT_COLOR}"
+echo -e "${NOTICE_COLOR_BOLD}Do you really want to continue? (y/n):${DEFAULT_COLOR}"
+read answer
+case $answer in
+    y|Y)
+        ;;
+    *) 
+        echo -e "operation aborted" >> $LOG_FILE
+        echo -e "${ERROR_COLOR}operation aborted${DEFAULT_COLOR}" >&2
+        exit 1
+        ;;
+esac
+
+if [ ! -f $BACKUP_ARCHIVE ] 
+then
+  echo -e "${NOTICE_COLOR}Save a backup of the modules directory${DEFAULT_COLOR}"
+  tar -zcvf $BACKUP_ARCHIVE ${MODULES_ABS_PATH}
+else
+  echo -e "${NOTICE_COLOR}Saving a backup of the modules directory is already done${DEFAULT_COLOR}"
+fi
+echo -e "Modules backup saved at ${BACKUP_ARCHIVE}" >> $LOG_FILE
+
+if [ ! -f $SQL_ARCHIVE ] 
+then
+  echo -e "Save a dump of the database${DEFAULT_COLOR}"
+  drush $SITE_ALIAS sql-dump --result-file=$SQL_ARCHIVE
+else
+  echo -e "${NOTICE_COLOR}Saving a dump of the database is already done${DEFAULT_COLOR}"
+fi
+echo -e "Database dump can be found at ${SQL_ARCHIVE}" >> $LOG_FILE
+
+MODULES_LIST=$(drush $SITE_ALIAS pm-list --no-core --status="disabled,not installed" --format="list" --fields="name" --type="module")
+MODULES_LIST_COUNT=$(sed -e 's/^[[:space:]]*//' <<<$(echo "$MODULES_LIST" | wc -l))
+MODULES_MACHINE_NAMES_LIST=$(sed -e 's/^[^(]*(//; s/).*$//'  <<<"$MODULES_LIST")
+
+echo -e "--------------------------------------------------" >> $LOG_FILE
+echo -e "" >> $LOG_FILE
+echo -e "--------------------------------------------------"
+echo -e ""
+echo -e "There is ${MODULES_LIST_COUNT} unused modules" >> $LOG_FILE
+echo -e "${NOTICE_COLOR}There is ${MODULES_LIST_COUNT} unused modules${DEFAULT_COLOR}"
+echo -e "${MODULES_LIST}" >> $LOG_FILE
+echo -e "${NOTICE_COLOR_BOLD}${MODULES_LIST}${DEFAULT_COLOR}"
+echo -e "" >> $LOG_FILE
+echo -e "--------------------------------------------------" >> $LOG_FILE
+echo -e ""
+echo -e "--------------------------------------------------"
+
+# drush $SITE_ALIAS dis $MODULES_MACHINE_NAMES_LIST
+# drush $SITE_ALIAS pm-uninstall $MODULES_MACHINE_NAMES_LIST
+
+for i in $MODULES_MACHINE_NAMES_LIST
+do
+  MODULE_MACHINE_NAME=$i
+  MODULE_PATH=$(drush $SITE_ALIAS php-eval "echo drupal_get_path('module', '$i');")
+  ABS_PATH=${DRUPAL_ROOT}/${MODULE_PATH}
+
+  if [ $ABS_PATH != $DRUPAL_ROOT/ ]
+  then
+
+    echo -e "" >> $LOG_FILE
+    echo -e ""
+    echo -e "Disabling ${MODULE_MACHINE_NAME}" >> $LOG_FILE
+    echo -e "${NOTICE_COLOR}Disabling $MODULE_MACHINE_NAME${DEFAULT_COLOR}"
+    drush -y $SITE_ALIAS dis $MODULE_MACHINE_NAME
+
+    echo -e "Uninstalling ${MODULE_MACHINE_NAME}" >> $LOG_FILE
+    echo -e "${NOTICE_COLOR}Uninstalling $MODULE_MACHINE_NAME${DEFAULT_COLOR}"
+    drush -y $SITE_ALIAS pm-uninstall $MODULE_MACHINE_NAME
+
+    # echo -e "${NOTICE_COLOR_BOLD}You are going to remove ${MODULE_PATH} directory${DEFAULT_COLOR}"
+    # echo -e "${NOTICE_COLOR_BOLD}Do you really want to continue? (y/n):${DEFAULT_COLOR}"
+    # read answer
+    # case $answer in
+    #     y|Y) 
+            # echo -e "Deleting ${MODULE_PATH} directory" >> $LOG_FILE
+            # echo -e "${NOTICE_COLOR}Deleting ${ABS_PATH} directory${DEFAULT_COLOR}"
+            # if [ -d $ABS_PATH ] 
+            # then
+            #   ls -lA ${ABS_PATH}
+            #   rm -rf ${DRUPAL_ROOT}/${MODULE_PATH}
+            # fi
+    #         ;;
+    # esac
+    
+    # TODO Delete directory only if it's not a submodule of an enabled module
+    if [ -d $ABS_PATH ] 
+    then
+      echo -e "Deleting ${MODULE_PATH} directory" >> $LOG_FILE
+      echo -e "${NOTICE_COLOR}Deleting ${ABS_PATH} directory${DEFAULT_COLOR}"
+      # ls -lA ${ABS_PATH}
+      rm -rf ${DRUPAL_ROOT}/${MODULE_PATH}
+    fi
+    
+    echo -e "" >> $LOG_FILE
+    echo -e "--------------------------------------------------" >> $LOG_FILE
+    echo -e ""
+    echo -e "--------------------------------------------------"
+
+  fi
+done
+echo -e ""
+echo -e "Cleanup of ${SITE_ALIAS} unused modules is now finished" >> $LOG_FILE
+echo -e "${SUCCESS_COLOR_BOLD}Cleanup of ${SITE_ALIAS} unused modules is now finished${DEFAULT_COLOR}"
+echo -e "${SUCCESS_COLOR}Check report at ${LOG_FILE}${DEFAULT_COLOR}"
+exit 0

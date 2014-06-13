@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# Arguments handler need works
+# Use static args instead
+# So you nedd to modify and uncomment the following line
+# set '@alias_from.local' '@alias_to.live'
+
+DEFAULT_COLOR='\033[0m'
+SUCCESS_COLOR='\033[32m'
+NOTICE_COLOR='\033[33m'
+ERROR_COLOR='\033[31m'
+SUCCESS_COLOR_BOLD='\033[32;1m'
+NOTICE_COLOR_BOLD='\033[33;1m'
+ERROR_COLOR_BOLD='\033[31;1m'
+
+DONE=$SUCCESS_COLOR_BOLD'✔ Done'$DEFAULT_COLOR
+
+SITE_ALIAS_FROM="$1"
+SITE_ALIAS_TO="$2"
+
+if [ -z $SITE_ALIAS_FROM ] ; then
+  echo "No site alias origin defined!"
+  exit 1
+fi
+echo -ne "${NOTICE_COLOR}Attempting to deploy from ${SITE_ALIAS_FROM}..."
+
+if [ -z $SITE_ALIAS_TO ] ; then
+  echo "No site alias destination defined!"
+  exit 1
+fi
+echo -e " to ${SITE_ALIAS_TO}${DEFAULT_COLOR}"
+echo -e ${NOTICE_COLOR_BOLD}'Do you really want to continue? (y/n):'${DEFAULT_COLOR}
+read answer
+case $answer in
+    y|Y) 
+        echo -e ${NOTICE_COLOR}'Starting deploy process...'${DEFAULT_COLOR}
+        ;;
+    *) 
+        echo "operation aborted" >&2
+        exit 1
+        ;;
+esac
+echo "RUN"
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}UPDATE BEFORE DEPLOYING${DEFAULT_COLOR}"
+# drush -vy $SITE_ALIAS_FROM pm-update
+drush -vy $SITE_ALIAS_TO pm-update
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}UPDATE FEATURES${DEFAULT_COLOR}"
+drush -vy $SITE_ALIAS_FROM fua
+drush -vy $SITE_ALIAS_TO fua
+# echo
+# echo "--------------------------------------------------------------------"
+# echo -e "${NOTICE_COLOR_BOLD}BACKUP TARGET SITE BEFORE DEPLOYING${DEFAULT_COLOR}"
+# drush -vy $SITE_ALIAS_TO archive-dump --tar-options="--exclude=.svn --exclude=.git --exclude=%files --exclude=.htaccess --exclude=.htpasswd --exclude=.DS_Store --exclude=*.log --exclude=.gitmodules"
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}PUT {$SITE_ALIAS_TO} in maintenance mode${DEFAULT_COLOR}"
+drush -y $SITE_ALIAS_TO vset maintenance_mode 1
+echo
+echo "Start deploying..."
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}SYNC THEMES${DEFAULT_COLOR}"
+drush $SITE_ALIAS_TO ssh 'rm -vrf sites/all/themes/custom/*' 
+drush -vy rsync $SITE_ALIAS_FROM:%themes $SITE_ALIAS_TO:%themes
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}SYNC LIBRARIES${DEFAULT_COLOR}"
+drush -vy rsync $SITE_ALIAS_FROM:%lib $SITE_ALIAS_TO:%lib
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}SYNC CUSTOM MODULES${DEFAULT_COLOR}"
+drush -vy rsync $SITE_ALIAS_FROM:%custom $SITE_ALIAS_TO:%custom
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}SYNC FEATURES${DEFAULT_COLOR}"
+drush -vy rsync $SITE_ALIAS_FROM:%feat $SITE_ALIAS_TO:%feat
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}UPDATE DATABASE${DEFAULT_COLOR}"
+drush -vy $SITE_ALIAS_TO updb
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}If you roll new features, don't forget to enable them!${DEFAULT_COLOR}"
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}REVERT ALL FEATURES${DEFAULT_COLOR}"
+drush -vy $SITE_ALIAS_TO fra
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${NOTICE_COLOR_BOLD}CLEAR CACHE${DEFAULT_COLOR}"
+drush -vy $SITE_ALIAS_TO vset preprocess_js 1
+drush -vy $SITE_ALIAS_TO vset preprocess_css 1
+drush -vy $SITE_ALIAS_TO vset cache 1
+drush -vy $SITE_ALIAS_TO cc all
+echo
+echo "--------------------------------------------------------------------"
+echo -e "${SUCCESS_COLOR}DEPLOY FINISHED${DEFAULT_COLOR} ${DONE}"
+echo
+
